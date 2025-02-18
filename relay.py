@@ -8,7 +8,7 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
-SOCKET_PATH = "/tmp/relay_tmate.sock"
+SOCKET_PATH = "/tmp/tmate.sock"
 WATCH_URL = "http://127.0.0.1:51753/command"  # Our GET endpoint that returns <div id="command">TEXT</div>
 
 def watch_webpage(interval_sec=5):
