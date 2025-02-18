@@ -13,9 +13,9 @@ def start_relay(args):
     2. Subscribes to llm_suggestions channel
     3. Displays formatted messages as they arrive
     """
-    print("\nDEBUG: Starting relay with Redis host: 192.168.3.52")
+    print("\nDEBUG: Starting relay with Redis host: localhost")
     try:
-        r = redis.Redis(host='192.168.3.52', port=6379, db=0)
+        r = redis.Redis(host='localhost', port=6379, db=0)
         # Test connection
         r.ping()
     except redis.ConnectionError:
@@ -62,7 +62,7 @@ def stop_relay(args):
     Stop the relay service by unsubscribing from Redis.
     """
     try:
-        r = redis.Redis(host='192.168.3.52', port=6379, db=0)
+        r = redis.Redis(host='localhost', port=6379, db=0)
         # Publish a special message to indicate stopping
         r.publish('llm_suggestions', '=== Relay stopping ===')
         print("Relay stopped.")
