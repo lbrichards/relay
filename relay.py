@@ -1,99 +1,45 @@
 #!/usr/bin/env python3
 
-import argparse
+import typer
 import redis
-import sys
-import time
-import os
-import pty
-import subprocess
-import glob
-import fcntl
-import termios
-import struct
 from datetime import datetime
+from typing import Optional
 
-def extract_tmate_urls(output):
-    """Extract web and ssh URLs from tmate output"""
-    web_ro = None
-    ssh_ro = None
+app = typer.Typer()
+
+@app.command()
+def start():
+    """Start the relay service"""
+    redis_client = redis.Redis(host='localhost', port=6379, db=0)
     
-    for line in output.split('\n'):
-        if 'web session read only:' in line:
-            web_ro = line.split(': ', 1)[1].strip()
-        elif 'ssh session read only:' in line:
-            ssh_ro = line.split(': ', 1)[1].strip()
-            
-    return web_ro, ssh_ro
-
-def get_tmate_socket():
-    """Find the active tmate socket"""
     try:
-        # Use glob to find tmate sockets
-        sockets = glob.glob('/tmp/tmate-*')
-        if sockets:
-            # Get the most recently modified socket
-            latest = max(sockets, key=os.path.getmtime)
-            print(f"DEBUG: Found tmate socket: {latest}")
-            return latest
-        else:
-            print("DEBUG: No tmate sockets found in /tmp")
-    except Exception as e:
-        print(f"DEBUG: Error finding tmate socket: {str(e)}")
-    return None
+        redis_client.ping()
+        typer.echo("Connected to Redis")
+    except redis.ConnectionError:
+        typer.echo("Error: Could not connect to Redis")
+        raise typer.Exit(1)
+    
+    # Subscribe to Redis channel
+    pubsub = redis_client.pubsub()
+    pubsub.subscribe('llm_suggestions')
+    typer.echo("Subscribed to llm_suggestions channel")
+    
+    # Listen for messages
+    try:
+        for message in pubsub.listen():
+            if message['type'] == 'message':
+                command = message['data'].decode('utf-8')
+                typer.echo(f"\nReceived command: {command}")
+                # Execute command
+                typer.launch(command)
+    except KeyboardInterrupt:
+        typer.echo("\nRelay stopped")
 
-class CommandShell:
-    """Manages an interactive shell process"""
-    def __init__(self):
-        self.process = None
-        
-    def start(self):
-        """Start an interactive shell process"""
-        try:
-            # Start bash in interactive mode
-            self.process = subprocess.Popen(
-                ['bash', '--login'],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # Line buffered
-                universal_newlines=True
-            )
-            
-            print("DEBUG: Started interactive shell")
-            return True
-                
-        except Exception as e:
-            print(f"ERROR: Failed to start shell: {str(e)}")
-            return False
-            
-    def send_command(self, command):
-        """Send a command to the shell"""
-        try:
-            if not self.process or self.process.poll() is not None:
-                print("ERROR: Shell process is not running")
-                return False
-                
-            # Send command with newline
-            self.process.stdin.write(command + "\n")
-            self.process.stdin.flush()
-            print(f"DEBUG: Sent command to shell: {command}")
-            return True
-            
-        except Exception as e:
-            print(f"ERROR: Failed to send command: {str(e)}")
-            return False
-            
-    def stop(self):
-        """Stop the shell process"""
-        try:
-            if self.process:
-                self.process.terminate()
-                self.process.wait(timeout=1)
-        except:
-            if self.process:
-                self.process.kill()
+def main():
+    app()
+
+if __name__ == "__main__":
+    main()
 
 def create_shell():
     """Create a new interactive shell"""
