@@ -9,31 +9,30 @@ import requests
 from bs4 import BeautifulSoup
 
 SOCKET_PATH = "/tmp/tmate.sock"
-WATCH_URL = "http://127.0.0.1:51753/command"  # Our GET endpoint that returns <div id="command">TEXT</div>
+WATCH_URL = "http://192.168.3.52:51753/command"  # AI Bridge endpoint that returns <div id="command">TEXT</div>
 
-def watch_webpage(interval_sec=5):
+def watch_webpage(interval_sec=1):
     """
-    Periodically fetch WATCH_URL, look for <div id="command">,
-    and if changed, send keys to tmate session.
-    Provides continuous status updates about connection and content.
+    Watch the AI Bridge webpage for command changes.
+    When a change is detected, display it in the terminal.
     """
     last_text = None
     connection_error_shown = False
-    print(f"\n[watch-web] Starting to watch {WATCH_URL}")
-    print("[watch-web] Waiting for commands...\n")
+    
+    print(f"\n[relay] Watching {WATCH_URL} for commands")
+    print("[relay] Commands received will appear here\n")
     
     while True:
-        # Check tmate session status
         if not is_tmate_session_alive():
-            print("[ERROR] Tmate session is not running! Please restart relay.")
+            print("\n[ERROR] Tmate session lost! Please restart relay.")
             break
 
         try:
-            resp = requests.get(WATCH_URL, timeout=10)
+            resp = requests.get(WATCH_URL, timeout=5)
             resp.raise_for_status()
             
             if connection_error_shown:
-                print("[watch-web] ✓ Connection restored")
+                print("\n[relay] ✓ Connection to AI Bridge restored")
                 connection_error_shown = False
                 
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -41,17 +40,22 @@ def watch_webpage(interval_sec=5):
             if div_cmd:
                 current_text = div_cmd.get_text(strip=True)
                 if current_text and current_text != last_text:
-                    print("\n" + "="*50)
-                    print(f"[watch-web] New command received:")
-                    print(f"➜ {current_text}")
-                    print("="*50 + "\n")
-                    send_keys_to_tmate(current_text)
-                    last_text = current_text
+                    # Clear line and move cursor to start
+                    print("\r\033[K", end="")
+                    
+                    # Print received command
+                    print("\n\033[1m=== Command Received ===\033[0m")
+                    print(f"{current_text}")
+                    print("\033[1m" + "="*24 + "\033[0m\n")
+                    
+                    # Echo command to tmate session
+                    if send_keys_to_tmate(current_text):
+                        last_text = current_text
             
         except requests.RequestException as e:
             if not connection_error_shown:
-                print(f"\n[watch-web] ✗ Cannot connect to {WATCH_URL}")
-                print(f"[watch-web] Make sure the web server is running on port 51753")
+                print("\n[relay] ✗ Cannot connect to AI Bridge")
+                print(f"[relay] Make sure AI Bridge is running on port 51753")
                 connection_error_shown = True
 
         time.sleep(interval_sec)
@@ -111,20 +115,22 @@ def send_keys_to_tmate(text, chunk_size=100):
         print(f"[ERROR] Failed to send command to tmate: {str(e)}")
         return False
 def start_relay(args):
+    """Start a relay session that:
+    1. Creates a tmate session for sharing terminal
+    2. Provides read-only access link
+    3. Watches AI Bridge for commands
+    4. Echoes commands to the terminal
     """
-    1) Kills any existing tmate session on SOCKET_PATH
-    2) Creates a new session
-    3) Prints read-only link
-    4) Starts web watcher thread
-    5) Attaches locally
-    """
-    print("\n=== Starting Relay ===")
+    print("\n=== Starting Relay Session ===")
     
     # Check if tmate is installed
     try:
         subprocess.run(["tmate", "-V"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("[ERROR] tmate is not installed. Please install it first.")
+        print("[ERROR] tmate is not installed")
+        print("Please install tmate first:")
+        print("  Ubuntu/Debian: sudo apt-get install tmate")
+        print("  macOS: brew install tmate")
         return
     
     # Kill any existing session quietly
@@ -142,17 +148,23 @@ def start_relay(args):
 
     # Create a new session in detached mode (minimal shell)
     print("• Creating new tmate session...")
-    os.environ["TMATE_NOPROMPT"] = "1"
+    os.environ["TMATE_NOPROMPT"] = "1"  # Try to suppress the welcome message
+    os.environ["TMATE_FOREGROUND"] = "1"  # Run in foreground mode
     if "TMUX" in os.environ:
         del os.environ["TMUX"]
+    
+    print("\nNOTE: When tmate starts, you may need to:")
+    print("1. Press 'q' to dismiss the welcome message")
+    print("2. Then you'll see commands as they arrive\n")
     
     # Retry session creation a few times
     max_retries = 3
     for attempt in range(max_retries):
         try:
             # First try without detached mode to see any errors
+            # Start tmate with minimal options
             result = subprocess.run(
-                ["tmate", "-S", SOCKET_PATH, "new-session", "bash", "--noprofile", "--norc"],
+                ["tmate", "-F", "-S", SOCKET_PATH, "new-session", "-d"],
                 capture_output=True,
                 text=True
             )
@@ -219,26 +231,26 @@ def start_relay(args):
             continue
 
     # Start background thread to watch the webpage
-    print("\n• Starting web watcher...")
+    print("\n• Starting command relay...")
     watcher_thread = threading.Thread(target=watch_webpage, daemon=True)
     watcher_thread.start()
 
-    # Attach locally
-    print("\n✓ Relay is ready!")
-    print("• Commands from the web will appear here and be sent to the tmate session")
-    print("• To detach: Ctrl-B D, or type 'exit'")
-    print("• Session will remain active after detaching\n")
+    # Show instructions
+    print("\n=== Relay Ready ===")
+    print("• Share the read-only SSH link with the LLM")
+    print("• Commands will appear here when received")
+    print("• Press Ctrl-B D to detach (session stays active)")
+    print("• Type 'exit' to end the session")
+    print("• Use 'relay stop' in another terminal to end completely\n")
     
     try:
         subprocess.run(["tmate", "-S", SOCKET_PATH, "attach"], check=True)
         print("\n=== Detached from relay session ===")
+        if is_tmate_session_alive():
+            print("• Session is still running and receiving commands")
+            print("• Use 'relay stop' to end it completely\n")
     except subprocess.CalledProcessError:
-        print("\n=== Relay session ended unexpectedly ===")
-    
-    if is_tmate_session_alive():
-        print("• Session is still running. Use 'relay stop' to end it completely.\n")
-    else:
-        print("• Session has ended.\n")
+        print("\n=== Relay session ended ===\n")
 
 def stop_relay(args):
     """Stop the tmate session if running."""
