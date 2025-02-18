@@ -41,26 +41,39 @@ def get_tmate_socket():
 def create_tmate_session():
     """Create a new tmate session with proper interactive shell"""
     try:
-        # Start tmate with interactive shell
+        # Kill any existing sessions
         subprocess.run(
-            ["tmate", "-S", "/tmp/tmate.sock", "new-session", "-d", "bash"],
-            check=True,
+            ["pkill", "-f", "tmate"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        print("DEBUG: Created tmate session")
+        time.sleep(1)
         
-        # Wait for session to be ready
-        for _ in range(5):  # Try for 5 seconds
-            if os.path.exists("/tmp/tmate.sock"):
-                print("DEBUG: Session is ready")
-                return "/tmp/tmate.sock"
+        # Start a new tmate session with explicit shell
+        process = subprocess.Popen(
+            ["tmate", "-F"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # Wait for session info
+        socket_path = None
+        for _ in range(10):  # Try for 10 seconds
+            line = process.stderr.readline()
+            if "socket" in line:
+                socket_path = line.split(": ")[1].strip()
+                break
             time.sleep(1)
             
-        print("[ERROR] Timed out waiting for session")
+        if socket_path and os.path.exists(socket_path):
+            print(f"DEBUG: Created session with socket {socket_path}")
+            return socket_path
+            
+        print("[ERROR] Could not get tmate socket path")
         return None
         
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"[ERROR] Failed to create tmate session: {str(e)}")
         return None
 
@@ -92,23 +105,14 @@ def send_to_terminal(socket_path, command):
         return False
         
     try:
-        # Clear any existing input
+        # Send command to the shell's stdin
         subprocess.run(
-            ['tmate', '-S', socket_path, 'send-keys', 'C-c'],
+            ["tmate", "-S", socket_path, "send-keys", "-l", command + "; echo '\\n'"],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        time.sleep(0.1)
-        
-        # Send the command
-        subprocess.run(
-            ['tmate', '-S', socket_path, 'send-keys', command],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        print(f"DEBUG: Command staged in terminal: {command}")
+        print(f"DEBUG: Command sent to shell: {command}")
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error sending command: {str(e)}")
