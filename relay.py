@@ -148,14 +148,24 @@ def start_relay(args):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            subprocess.run(
-                ["tmate", "-S", SOCKET_PATH, "new-session", "-d", "bash", "--noprofile", "--norc"],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+            # First try without detached mode to see any errors
+            result = subprocess.run(
+                ["tmate", "-S", SOCKET_PATH, "new-session", "bash", "--noprofile", "--norc"],
+                capture_output=True,
+                text=True
             )
-            break
-        except subprocess.CalledProcessError:
+            if result.returncode != 0:
+                print(f"[DEBUG] tmate output: {result.stdout}")
+                print(f"[DEBUG] tmate error: {result.stderr}")
+                if attempt == max_retries - 1:
+                    print("[ERROR] Failed to create tmate session after multiple attempts")
+                    return
+                print(f"• Retrying session creation (attempt {attempt + 2}/{max_retries})...")
+                time.sleep(2)
+            else:
+                break
+        except subprocess.CalledProcessError as e:
+            print(f"[DEBUG] Exception: {str(e)}")
             if attempt == max_retries - 1:
                 print("[ERROR] Failed to create tmate session after multiple attempts")
                 return
