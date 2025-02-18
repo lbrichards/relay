@@ -193,10 +193,10 @@ def start_relay(args):
                 print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Command received:")
                 print(f"➜ {command}")
                 
-                if send_to_terminal(socket_path, command):
-                    print("✓ Command ready - press Enter to execute")
+                if send_to_terminal(shell, command):
+                    print("✓ Command sent to shell")
                 else:
-                    print("✗ Failed to send command to terminal")
+                    print("✗ Failed to send command to shell")
                 
     except KeyboardInterrupt:
         print("\n\n=== Relay stopped ===")
