@@ -33,16 +33,35 @@ def start():
                 typer.echo(f"\nReceived command: {command}")
                 # Execute command
                 try:
-                    result = subprocess.run(
-                        command,
-                        shell=True,
+                    # Start an interactive shell process
+                    process = subprocess.Popen(
+                        ['/bin/bash', '-c', command],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         text=True,
-                        capture_output=True
+                        bufsize=1,  # Line buffered
+                        universal_newlines=True
                     )
-                    if result.stdout:
-                        typer.echo(f"Output:\n{result.stdout}")
-                    if result.stderr:
-                        typer.echo(f"Error:\n{result.stderr}", err=True)
+                    
+                    # Read output and error streams line by line
+                    while True:
+                        output = process.stdout.readline()
+                        error = process.stderr.readline()
+                        
+                        if output:
+                            typer.echo(output.rstrip())
+                        if error:
+                            typer.echo(error.rstrip(), err=True)
+                            
+                        # Break if process is done and no more output
+                        if process.poll() is not None and not output and not error:
+                            break
+                            
+                    # Get final return code
+                    return_code = process.wait()
+                    if return_code != 0:
+                        typer.echo(f"Command exited with code {return_code}", err=True)
+                        
                 except Exception as e:
                     typer.echo(f"Error executing command: {str(e)}", err=True)
     except KeyboardInterrupt:
