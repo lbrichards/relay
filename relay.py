@@ -7,15 +7,33 @@ import time
 import subprocess
 from datetime import datetime
 
-SOCKET_PATH = "/tmp/tmate.sock"
+def get_tmate_socket():
+    """Find the active tmate socket"""
+    try:
+        # List all files in /tmp that start with 'tmate-'
+        result = subprocess.run(['ls', '/tmp/tmate-*'], capture_output=True, text=True, check=True)
+        sockets = result.stdout.strip().split('\n')
+        # Return the first socket found
+        if sockets:
+            return sockets[0]
+    except subprocess.CalledProcessError:
+        pass
+    return None
 
 def send_to_terminal(command):
     """Send command to terminal, ready for execution"""
+    socket_path = get_tmate_socket()
+    if not socket_path:
+        print("Error: No active tmate session found")
+        return False
+        
     try:
         # Clear any existing input
-        subprocess.run(['tmate', '-S', SOCKET_PATH, 'send-keys', 'C-u'], check=True)
+        subprocess.run(['tmate', '-S', socket_path, 'send-keys', 'C-u'], check=True)
         # Send the command
-        subprocess.run(['tmate', '-S', SOCKET_PATH, 'send-keys', command], check=True)
+        subprocess.run(['tmate', '-S', socket_path, 'send-keys', command], check=True)
+        # Send Enter key
+        subprocess.run(['tmate', '-S', socket_path, 'send-keys', 'Enter'], check=True)
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error: {str(e)}")
