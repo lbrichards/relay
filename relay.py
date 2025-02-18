@@ -42,66 +42,67 @@ def get_tmate_socket():
         print(f"DEBUG: Error finding tmate socket: {str(e)}")
     return None
 
-class InteractiveShell:
-    """Manages an interactive shell session using PTY"""
+class CommandPipe:
+    """Manages command input through a named pipe"""
     def __init__(self):
-        self.master_fd = None
-        self.shell_pid = None
+        self.pipe_path = "/tmp/relay_commands"
+        self.pipe_fd = None
         
     def start(self):
-        """Start an interactive shell"""
+        """Create the named pipe"""
         try:
-            # Create a new PTY
-            self.shell_pid, self.master_fd = pty.fork()
+            # Remove existing pipe if any
+            if os.path.exists(self.pipe_path):
+                os.unlink(self.pipe_path)
+                
+            # Create new pipe
+            os.mkfifo(self.pipe_path)
             
-            if self.shell_pid == 0:  # Child process
-                # Execute bash in the child
-                os.execvp("bash", ["bash", "--login"])
-            else:  # Parent process
-                # Set the terminal size
-                self._set_terminal_size(24, 80)
-                print("DEBUG: Started interactive shell")
-                return True
+            # Open pipe for writing (non-blocking)
+            self.pipe_fd = os.open(self.pipe_path, os.O_WRONLY | os.O_NONBLOCK)
+            
+            print("DEBUG: Created command pipe")
+            
+            # Start a shell that reads from the pipe
+            subprocess.Popen(
+                f"cat {self.pipe_path} | bash",
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            return True
                 
         except Exception as e:
-            print(f"ERROR: Failed to start shell: {str(e)}")
+            print(f"ERROR: Failed to create pipe: {str(e)}")
             return False
             
-    def _set_terminal_size(self, rows, cols):
-        """Set the PTY window size"""
-        try:
-            term_size = struct.pack('HHHH', rows, cols, 0, 0)
-            fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, term_size)
-        except:
-            pass
-            
     def send_command(self, command):
-        """Send a command to the shell"""
+        """Send a command through the pipe"""
         try:
             # Add newline to execute the command
             full_command = command + "\n"
-            os.write(self.master_fd, full_command.encode())
-            time.sleep(0.1)  # Give shell time to process
+            os.write(self.pipe_fd, full_command.encode())
             return True
         except Exception as e:
             print(f"ERROR: Failed to send command: {str(e)}")
             return False
             
     def stop(self):
-        """Stop the shell"""
+        """Clean up the pipe"""
         try:
-            if self.master_fd:
-                os.close(self.master_fd)
-            if self.shell_pid:
-                os.kill(self.shell_pid, 9)
+            if self.pipe_fd:
+                os.close(self.pipe_fd)
+            if os.path.exists(self.pipe_path):
+                os.unlink(self.pipe_path)
         except:
             pass
 
-def create_tmate_session():
-    """Create a new tmate session with interactive shell"""
-    shell = InteractiveShell()
-    if shell.start():
-        return shell
+def create_command_pipe():
+    """Create a new command pipe for shell interaction"""
+    pipe = CommandPipe()
+    if pipe.start():
+        return pipe
     return None
 
 def get_tmate_urls(socket_path):
@@ -167,13 +168,13 @@ def start_relay(args):
         print(f"\n[ERROR] Redis error: {str(e)}")
         return
 
-    # Create interactive shell
-    shell = InteractiveShell()
-    if not shell.start():
-        print("[ERROR] Failed to create interactive shell")
+    # Create command pipe
+    pipe = create_command_pipe()
+    if not pipe:
+        print("[ERROR] Failed to create command pipe")
         return
 
-    print("\n✓ Interactive shell ready")
+    print("\n✓ Command pipe ready")
     print("• Commands will be executed in this terminal")
     print("• Press Ctrl-C to stop\n")
 
