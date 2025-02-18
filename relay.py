@@ -5,8 +5,12 @@ import redis
 import sys
 import time
 import os
+import pty
 import subprocess
 import glob
+import fcntl
+import termios
+import struct
 from datetime import datetime
 
 def extract_tmate_urls(output):
@@ -38,44 +42,67 @@ def get_tmate_socket():
         print(f"DEBUG: Error finding tmate socket: {str(e)}")
     return None
 
+class InteractiveShell:
+    """Manages an interactive shell session using PTY"""
+    def __init__(self):
+        self.master_fd = None
+        self.shell_pid = None
+        
+    def start(self):
+        """Start an interactive shell"""
+        try:
+            # Create a new PTY
+            self.shell_pid, self.master_fd = pty.fork()
+            
+            if self.shell_pid == 0:  # Child process
+                # Execute bash in the child
+                os.execvp("bash", ["bash", "--login"])
+            else:  # Parent process
+                # Set the terminal size
+                self._set_terminal_size(24, 80)
+                print("DEBUG: Started interactive shell")
+                return True
+                
+        except Exception as e:
+            print(f"ERROR: Failed to start shell: {str(e)}")
+            return False
+            
+    def _set_terminal_size(self, rows, cols):
+        """Set the PTY window size"""
+        try:
+            term_size = struct.pack('HHHH', rows, cols, 0, 0)
+            fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, term_size)
+        except:
+            pass
+            
+    def send_command(self, command):
+        """Send a command to the shell"""
+        try:
+            # Add newline to execute the command
+            full_command = command + "\n"
+            os.write(self.master_fd, full_command.encode())
+            time.sleep(0.1)  # Give shell time to process
+            return True
+        except Exception as e:
+            print(f"ERROR: Failed to send command: {str(e)}")
+            return False
+            
+    def stop(self):
+        """Stop the shell"""
+        try:
+            if self.master_fd:
+                os.close(self.master_fd)
+            if self.shell_pid:
+                os.kill(self.shell_pid, 9)
+        except:
+            pass
+
 def create_tmate_session():
-    """Create a new tmate session with proper interactive shell"""
-    try:
-        # Kill any existing sessions
-        subprocess.run(
-            ["pkill", "-f", "tmate"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        time.sleep(1)
-        
-        # Start a new tmate session with explicit shell
-        process = subprocess.Popen(
-            ["tmate", "-F"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
-        # Wait for session info
-        socket_path = None
-        for _ in range(10):  # Try for 10 seconds
-            line = process.stderr.readline()
-            if "socket" in line:
-                socket_path = line.split(": ")[1].strip()
-                break
-            time.sleep(1)
-            
-        if socket_path and os.path.exists(socket_path):
-            print(f"DEBUG: Created session with socket {socket_path}")
-            return socket_path
-            
-        print("[ERROR] Could not get tmate socket path")
-        return None
-        
-    except Exception as e:
-        print(f"[ERROR] Failed to create tmate session: {str(e)}")
-        return None
+    """Create a new tmate session with interactive shell"""
+    shell = InteractiveShell()
+    if shell.start():
+        return shell
+    return None
 
 def get_tmate_urls(socket_path):
     """Get both web and ssh URLs from tmate session"""
@@ -98,25 +125,13 @@ def get_tmate_urls(socket_path):
     
     return None, None
 
-def send_to_terminal(socket_path, command):
+def send_to_terminal(shell, command):
     """Send command to terminal, ready for execution"""
-    if not socket_path:
-        print("Error: No active tmate session found")
+    if not shell:
+        print("Error: No active shell session")
         return False
         
-    try:
-        # Send command to the shell's stdin
-        subprocess.run(
-            ["tmate", "-S", socket_path, "send-keys", "-l", command + "; echo '\\n'"],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        print(f"DEBUG: Command sent to shell: {command}")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"Error sending command: {str(e)}")
-        return False
+    return shell.send_command(command)
 
 def publish_urls_to_redis(r, web_url, ssh_url):
     """Publish tmate URLs to Redis for OpenHands to find"""
