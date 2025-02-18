@@ -7,13 +7,15 @@ import time
 import subprocess
 from datetime import datetime
 
-def copy_to_clipboard(text):
-    """Copy text to system clipboard using pbcopy (macOS)"""
+def send_to_terminal(command):
+    """Send command to terminal, ready for execution"""
     try:
-        process = subprocess.Popen('pbcopy', stdin=subprocess.PIPE)
-        process.communicate(text.encode('utf-8'))
+        # Clear any existing input
+        subprocess.run(['tmate', 'send-keys', 'C-u'], check=True)
+        # Send the command
+        subprocess.run(['tmate', 'send-keys', command], check=True)
         return True
-    except:
+    except subprocess.CalledProcessError:
         return False
 
 def start_relay(args):
@@ -61,13 +63,12 @@ def start_relay(args):
                 print(f"{command}")
                 print("="*50)
                 
-                if copy_to_clipboard(command):
-                    print("\n✓ Command copied to clipboard")
-                    print("• Press Cmd+V to paste")
-                    print("• Then press Enter to execute\n")
+                if send_to_terminal(command):
+                    print("\n✓ Command ready")
+                    print("• Press Enter to execute\n")
                 else:
-                    print("\n✗ Could not copy to clipboard")
-                    print("• Please copy the command manually\n")
+                    print("\n✗ Could not send command to terminal")
+                    print("• Please type the command manually\n")
                 
     except KeyboardInterrupt:
         print("\n\n=== Relay stopped ===")
