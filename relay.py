@@ -9,22 +9,39 @@ import subprocess
 import glob
 from datetime import datetime
 
+def extract_tmate_urls(output):
+    """Extract web and ssh URLs from tmate output"""
+    web_ro = None
+    ssh_ro = None
+    
+    for line in output.split('\n'):
+        if 'web session read only:' in line:
+            web_ro = line.split(': ', 1)[1].strip()
+        elif 'ssh session read only:' in line:
+            ssh_ro = line.split(': ', 1)[1].strip()
+            
+    return web_ro, ssh_ro
+
 def get_tmate_urls(socket_path):
-    """Get both web and ssh URLs for the tmate session"""
+    """Get both web and ssh URLs from tmate session"""
     try:
-        web_ro = subprocess.check_output(
-            ['tmate', '-S', socket_path, 'display', '-p', '#{tmate_web_ro}'],
-            stderr=subprocess.DEVNULL
-        ).decode().strip()
+        # First try to get URLs from socket
+        result = subprocess.run(
+            ['tmate', '-S', socket_path, 'show-messages'],
+            capture_output=True,
+            text=True
+        )
         
-        ssh_ro = subprocess.check_output(
-            ['tmate', '-S', socket_path, 'display', '-p', '#{tmate_ssh_ro}'],
-            stderr=subprocess.DEVNULL
-        ).decode().strip()
-        
-        return web_ro, ssh_ro
-    except subprocess.CalledProcessError:
-        return None, None
+        if result.stdout:
+            print("DEBUG: Got tmate messages output")
+            return extract_tmate_urls(result.stdout)
+        else:
+            print("DEBUG: No output from tmate show-messages")
+            
+    except subprocess.CalledProcessError as e:
+        print(f"DEBUG: Error getting tmate messages: {str(e)}")
+    
+    return None, None
 
 def get_tmate_socket():
     """Find the active tmate socket"""
@@ -98,23 +115,26 @@ def start_relay(args):
         print(f"\n[ERROR] Redis error: {str(e)}")
         return
 
-    # Get tmate socket and URLs
+    # Get tmate socket
     socket_path = get_tmate_socket()
     if not socket_path:
         print("[ERROR] No active tmate session found")
         return
 
+    # Get URLs from tmate messages
     web_url, ssh_url = get_tmate_urls(socket_path)
-    if not web_url or not ssh_url:
-        print("[ERROR] Could not get tmate URLs")
-        return
-
-    # Publish URLs to Redis
-    if publish_urls_to_redis(r, web_url, ssh_url):
-        print("\n✓ Session URLs:")
+    if web_url and ssh_url:
+        print("\n✓ Found tmate URLs:")
         print(f"• Web (preferred): {web_url}")
         print(f"• SSH (alternate): {ssh_url}")
-        print("URLs have been shared with OpenHands\n")
+        
+        # Publish URLs to Redis
+        if publish_urls_to_redis(r, web_url, ssh_url):
+            print("• URLs have been shared with OpenHands\n")
+        else:
+            print("• Failed to share URLs with OpenHands\n")
+    else:
+        print("[WARN] Could not get tmate URLs - will retry periodically")
 
     try:
         pubsub = r.pubsub(ignore_subscribe_messages=True)
