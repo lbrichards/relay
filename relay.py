@@ -4,7 +4,9 @@ import argparse
 import redis
 import sys
 import time
+import os
 import subprocess
+import glob
 from datetime import datetime
 
 def get_tmate_urls(socket_path):
@@ -27,14 +29,15 @@ def get_tmate_urls(socket_path):
 def get_tmate_socket():
     """Find the active tmate socket"""
     try:
-        # List all files in /tmp that start with 'tmate-'
-        result = subprocess.run(['ls', '/tmp/tmate-*'], shell=True, capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout:
+        # Use glob to find tmate sockets
+        sockets = glob.glob('/tmp/tmate-*')
+        if sockets:
             # Get the most recently modified socket
-            sockets = result.stdout.strip().split('\n')
-            latest = max(sockets, key=lambda x: os.path.getmtime(x))
+            latest = max(sockets, key=os.path.getmtime)
             print(f"DEBUG: Found tmate socket: {latest}")
             return latest
+        else:
+            print("DEBUG: No tmate sockets found in /tmp")
     except Exception as e:
         print(f"DEBUG: Error finding tmate socket: {str(e)}")
     return None
