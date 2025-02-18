@@ -77,14 +77,14 @@ def main():
         "start",
         help="Start relay service"
     )
-    parser_start.add_defaults(func=start_relay)
+    parser_start.set_defaults(func=start_relay)
 
     # Stop command
     parser_stop = subparsers.add_parser(
         "stop",
         help="Stop relay service"
     )
-    parser_stop.add_defaults(func=stop_relay)
+    parser_stop.set_defaults(func=stop_relay)
 
     args = parser.parse_args()
     if not args.command:
