@@ -2,6 +2,7 @@
 
 import typer
 import redis
+import subprocess
 from datetime import datetime
 from typing import Optional
 
@@ -31,7 +32,19 @@ def start():
                 command = message['data'].decode('utf-8')
                 typer.echo(f"\nReceived command: {command}")
                 # Execute command
-                typer.launch(command)
+                try:
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        text=True,
+                        capture_output=True
+                    )
+                    if result.stdout:
+                        typer.echo(f"Output:\n{result.stdout}")
+                    if result.stderr:
+                        typer.echo(f"Error:\n{result.stderr}", err=True)
+                except Exception as e:
+                    typer.echo(f"Error executing command: {str(e)}", err=True)
     except KeyboardInterrupt:
         typer.echo("\nRelay stopped")
 
