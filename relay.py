@@ -42,67 +42,64 @@ def get_tmate_socket():
         print(f"DEBUG: Error finding tmate socket: {str(e)}")
     return None
 
-class CommandPipe:
-    """Manages command input through a named pipe"""
+class CommandShell:
+    """Manages an interactive shell process"""
     def __init__(self):
-        self.pipe_path = "/tmp/relay_commands"
-        self.pipe_fd = None
+        self.process = None
         
     def start(self):
-        """Create the named pipe"""
+        """Start an interactive shell process"""
         try:
-            # Remove existing pipe if any
-            if os.path.exists(self.pipe_path):
-                os.unlink(self.pipe_path)
-                
-            # Create new pipe
-            os.mkfifo(self.pipe_path)
-            
-            # Open pipe for writing (non-blocking)
-            self.pipe_fd = os.open(self.pipe_path, os.O_WRONLY | os.O_NONBLOCK)
-            
-            print("DEBUG: Created command pipe")
-            
-            # Start a shell that reads from the pipe
-            subprocess.Popen(
-                f"cat {self.pipe_path} | bash",
-                shell=True,
+            # Start bash in interactive mode
+            self.process = subprocess.Popen(
+                ['bash', '--login'],
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,  # Line buffered
+                universal_newlines=True
             )
             
+            print("DEBUG: Started interactive shell")
             return True
                 
         except Exception as e:
-            print(f"ERROR: Failed to create pipe: {str(e)}")
+            print(f"ERROR: Failed to start shell: {str(e)}")
             return False
             
     def send_command(self, command):
-        """Send a command through the pipe"""
+        """Send a command to the shell"""
         try:
-            # Add newline to execute the command
-            full_command = command + "\n"
-            os.write(self.pipe_fd, full_command.encode())
+            if not self.process or self.process.poll() is not None:
+                print("ERROR: Shell process is not running")
+                return False
+                
+            # Send command with newline
+            self.process.stdin.write(command + "\n")
+            self.process.stdin.flush()
+            print(f"DEBUG: Sent command to shell: {command}")
             return True
+            
         except Exception as e:
             print(f"ERROR: Failed to send command: {str(e)}")
             return False
             
     def stop(self):
-        """Clean up the pipe"""
+        """Stop the shell process"""
         try:
-            if self.pipe_fd:
-                os.close(self.pipe_fd)
-            if os.path.exists(self.pipe_path):
-                os.unlink(self.pipe_path)
+            if self.process:
+                self.process.terminate()
+                self.process.wait(timeout=1)
         except:
-            pass
+            if self.process:
+                self.process.kill()
 
-def create_command_pipe():
-    """Create a new command pipe for shell interaction"""
-    pipe = CommandPipe()
-    if pipe.start():
-        return pipe
+def create_shell():
+    """Create a new interactive shell"""
+    shell = CommandShell()
+    if shell.start():
+        return shell
     return None
 
 def get_tmate_urls(socket_path):
@@ -168,13 +165,13 @@ def start_relay(args):
         print(f"\n[ERROR] Redis error: {str(e)}")
         return
 
-    # Create command pipe
-    pipe = create_command_pipe()
-    if not pipe:
-        print("[ERROR] Failed to create command pipe")
+    # Create interactive shell
+    shell = create_shell()
+    if not shell:
+        print("[ERROR] Failed to create interactive shell")
         return
 
-    print("\n✓ Command pipe ready")
+    print("\n✓ Interactive shell ready")
     print("• Commands will be executed in this terminal")
     print("• Press Ctrl-C to stop\n")
 
