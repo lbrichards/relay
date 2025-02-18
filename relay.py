@@ -15,29 +15,60 @@ def watch_webpage(interval_sec=5):
     """
     Periodically fetch WATCH_URL, look for <div id="command">,
     and if changed, send keys to tmate session.
-    We only print a line when new text is actually detected (not every fetch).
+    Provides continuous status updates about connection and content.
     """
     last_text = None
+    connection_error_shown = False
+    print(f"\n[watch-web] Starting to watch {WATCH_URL}")
+    print("[watch-web] Waiting for commands...\n")
+    
     while True:
+        # Check tmate session status
+        if not is_tmate_session_alive():
+            print("[ERROR] Tmate session is not running! Please restart relay.")
+            break
+
         try:
             resp = requests.get(WATCH_URL, timeout=10)
             resp.raise_for_status()
-        except Exception:
-            # Suppress fetch/HTTP errors, so no repeated logs every interval.
-            time.sleep(interval_sec)
-            continue
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        div_cmd = soup.find(id="command")
-        if div_cmd:
-            current_text = div_cmd.get_text(strip=True)
-            if current_text and current_text != last_text:
-                print(f"[watch-web] New text detected: {current_text}")
-                send_keys_to_tmate(current_text)
-                last_text = current_text
+            
+            if connection_error_shown:
+                print("[watch-web] ✓ Connection restored")
+                connection_error_shown = False
+                
+            soup = BeautifulSoup(resp.text, "html.parser")
+            div_cmd = soup.find(id="command")
+            if div_cmd:
+                current_text = div_cmd.get_text(strip=True)
+                if current_text and current_text != last_text:
+                    print("\n" + "="*50)
+                    print(f"[watch-web] New command received:")
+                    print(f"➜ {current_text}")
+                    print("="*50 + "\n")
+                    send_keys_to_tmate(current_text)
+                    last_text = current_text
+            
+        except requests.RequestException as e:
+            if not connection_error_shown:
+                print(f"\n[watch-web] ✗ Cannot connect to {WATCH_URL}")
+                print(f"[watch-web] Make sure the web server is running on port 51753")
+                connection_error_shown = True
 
         time.sleep(interval_sec)
 
+
+def is_tmate_session_alive():
+    """Check if the tmate session is running."""
+    try:
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "has-session"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 def send_keys_to_tmate(text):
     print(f"[watch-web] Injecting line to tmate (0.0): {text}")
@@ -69,38 +100,64 @@ def start_relay(args):
     4) Starts web watcher thread
     5) Attaches locally
     """
+    print("\n=== Starting Relay ===")
+    
     # Kill any existing session quietly
-    subprocess.run(
-        ["tmate", "-S", SOCKET_PATH, "kill-session"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+    if is_tmate_session_alive():
+        print("• Cleaning up existing tmate session...")
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "kill-session"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
 
     # Create a new session in detached mode (minimal shell)
-    # Suppress tmate welcome prompt
+    print("• Creating new tmate session...")
     os.environ["TMATE_NOPROMPT"] = "1"
-    subprocess.run(
-        ["tmate", "-S", SOCKET_PATH, "new-session", "-d", "bash", "--noprofile", "--norc"],
-        check=True
-    )
+    try:
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "new-session", "-d", "bash", "--noprofile", "--norc"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except subprocess.CalledProcessError:
+        print("[ERROR] Failed to create tmate session. Is tmate installed?")
+        return
 
     # Wait for tmate-ready
-    subprocess.run(["tmate", "-S", SOCKET_PATH, "wait", "tmate-ready"], check=True)
+    print("• Waiting for tmate session to be ready...")
+    try:
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "wait", "tmate-ready"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except subprocess.CalledProcessError:
+        print("[ERROR] Tmate session failed to initialize")
+        return
 
     # Retrieve read-only link
-    ssh_ro_link = subprocess.check_output(
-        ["tmate", "-S", SOCKET_PATH, "display", "-p", "#{tmate_ssh_ro}"]
-    ).decode("utf-8").strip()
-
-    print(f"Read-Only Link: {ssh_ro_link}")
+    try:
+        ssh_ro_link = subprocess.check_output(
+            ["tmate", "-S", SOCKET_PATH, "display", "-p", "#{tmate_ssh_ro}"]
+        ).decode("utf-8").strip()
+        print(f"\n✓ Read-Only Link: {ssh_ro_link}")
+    except subprocess.CalledProcessError:
+        print("[ERROR] Failed to get read-only link")
+        return
 
     # Start background thread to watch the webpage
+    print("• Starting web watcher...")
     watcher_thread = threading.Thread(target=watch_webpage, daemon=True)
     watcher_thread.start()
 
     # Attach locally
-    print("Attaching locally to tmate session. (Detach: Ctrl-B D, or 'exit')")
+    print("\n✓ Relay is ready!")
+    print("• Commands from the web will appear here and be sent to the tmate session")
+    print("• To detach: Ctrl-B D, or type 'exit'\n")
     subprocess.run(["tmate", "-S", SOCKET_PATH, "attach"])
-    print("Detached or session ended.")
+    print("\n=== Relay session ended ===\n")
 
 def stop_relay(args):
     """Stop the tmate session if running."""
