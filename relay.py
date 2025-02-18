@@ -13,6 +13,7 @@ def start_relay(args):
     2. Subscribes to llm_suggestions channel
     3. Displays formatted messages as they arrive
     """
+    print("\nDEBUG: Starting relay with Redis host: 192.168.3.52")
     try:
         r = redis.Redis(host='192.168.3.52', port=6379, db=0)
         # Test connection
@@ -28,8 +29,9 @@ def start_relay(args):
         return
 
     try:
-        pubsub = r.pubsub()
+        pubsub = r.pubsub(ignore_subscribe_messages=True)
         pubsub.subscribe('llm_suggestions')
+        print("DEBUG: Subscribed to Redis channel 'llm_suggestions'")
         
         print("\n=== Relay Started ===")
         print("• Connected to Redis")
@@ -38,7 +40,8 @@ def start_relay(args):
         print("• Press Ctrl-C to stop\n")
         
         for message in pubsub.listen():
-            if message['type'] == 'message':
+            print(f"DEBUG: Received message: {message}")
+            if message and message['type'] == 'message':
                 # Clear line and print with timestamp
                 print("\r\033[K", end="")
                 timestamp = datetime.now().strftime("%H:%M:%S")
