@@ -22,6 +22,58 @@ def extract_tmate_urls(output):
             
     return web_ro, ssh_ro
 
+def get_tmate_socket():
+    """Find the active tmate socket"""
+    try:
+        # Use glob to find tmate sockets
+        sockets = glob.glob('/tmp/tmate-*')
+        if sockets:
+            # Get the most recently modified socket
+            latest = max(sockets, key=os.path.getmtime)
+            print(f"DEBUG: Found tmate socket: {latest}")
+            return latest
+        else:
+            print("DEBUG: No tmate sockets found in /tmp")
+    except Exception as e:
+        print(f"DEBUG: Error finding tmate socket: {str(e)}")
+    return None
+
+def create_tmate_session():
+    """Create a new tmate session with proper interactive shell"""
+    try:
+        # Start tmate with interactive shell
+        subprocess.run(
+            ["tmate", "new-session", "-d", "/bin/bash --login"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        print("DEBUG: Created tmate session with interactive shell")
+        
+        # Give the session a moment to initialize
+        time.sleep(1)
+        
+        # Get the socket path
+        socket_path = get_tmate_socket()
+        if not socket_path:
+            print("[ERROR] Could not find tmate socket after creating session")
+            return None
+            
+        # Configure the session for proper terminal behavior
+        subprocess.run(
+            ["tmate", "-S", socket_path, "set", "-g", "status", "off"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        
+        print("DEBUG: Configured tmate session")
+        return socket_path
+        
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] Failed to create tmate session: {str(e)}")
+        return None
+
 def get_tmate_urls(socket_path):
     """Get both web and ssh URLs from tmate session"""
     try:
@@ -43,37 +95,21 @@ def get_tmate_urls(socket_path):
     
     return None, None
 
-def get_tmate_socket():
-    """Find the active tmate socket"""
-    try:
-        # Use glob to find tmate sockets
-        sockets = glob.glob('/tmp/tmate-*')
-        if sockets:
-            # Get the most recently modified socket
-            latest = max(sockets, key=os.path.getmtime)
-            print(f"DEBUG: Found tmate socket: {latest}")
-            return latest
-        else:
-            print("DEBUG: No tmate sockets found in /tmp")
-    except Exception as e:
-        print(f"DEBUG: Error finding tmate socket: {str(e)}")
-    return None
-
-def send_to_terminal(command):
+def send_to_terminal(socket_path, command):
     """Send command to terminal, ready for execution"""
-    socket_path = get_tmate_socket()
     if not socket_path:
         print("Error: No active tmate session found")
         return False
         
     try:
-        # Clear any existing input
-        subprocess.run(['tmate', '-S', socket_path, 'send-keys', '-l', command], 
-                      check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Send Enter key
-        subprocess.run(['tmate', '-S', socket_path, 'send-keys', 'Enter'],
-                      check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"DEBUG: Command sent via {socket_path}")
+        # Send the command without executing it
+        subprocess.run(
+            ['tmate', '-S', socket_path, 'send-keys', command],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        print(f"DEBUG: Command staged in terminal: {command}")
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error sending command: {str(e)}")
@@ -93,17 +129,15 @@ def publish_urls_to_redis(r, web_url, ssh_url):
         return False
 
 def start_relay(args):
-    """
-    Start the relay service that:
-    1. Connects to Redis
-    2. Subscribes to llm_suggestions channel
-    3. Publishes tmate URLs to Redis
-    4. Displays formatted messages as they arrive
+    """Start a relay session with:
+    1. Interactive tmate shell
+    2. Redis connection for commands
+    3. URL sharing
     """
     print("\nDEBUG: Starting relay with Redis host: localhost")
+    
     try:
         r = redis.Redis(host='localhost', port=6379, db=0)
-        # Test connection
         r.ping()
     except redis.ConnectionError:
         print("\n[ERROR] Cannot connect to Redis")
@@ -115,10 +149,10 @@ def start_relay(args):
         print(f"\n[ERROR] Redis error: {str(e)}")
         return
 
-    # Get tmate socket
-    socket_path = get_tmate_socket()
+    # Create new tmate session
+    socket_path = create_tmate_session()
     if not socket_path:
-        print("[ERROR] No active tmate session found")
+        print("[ERROR] Failed to create tmate session")
         return
 
     # Get URLs from tmate messages
@@ -139,47 +173,43 @@ def start_relay(args):
     try:
         pubsub = r.pubsub(ignore_subscribe_messages=True)
         pubsub.subscribe('llm_suggestions')
-        print("DEBUG: Subscribed to Redis channel 'llm_suggestions'")
         
         print("\n=== Relay Started ===")
         print("• Connected to Redis")
         print("• Subscribed to llm_suggestions channel")
-        print("• Messages from LLM will appear here")
+        print("• Commands will appear here")
         print("• Press Ctrl-C to stop\n")
         
         for message in pubsub.listen():
-            print(f"DEBUG: Received message: {message}")
             if message and message['type'] == 'message':
-                # Clear line and print with timestamp
-                print("\r\033[K", end="")
-                timestamp = datetime.now().strftime("%H:%M:%S")
                 command = message['data'].decode('utf-8')
-                print(f"\n[{timestamp}] Sending command to terminal...")
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Command received:")
+                print(f"➜ {command}")
                 
-                if send_to_terminal(command):
-                    print("\n✓ Command ready")
-                    print("• Press Enter to execute\n")
+                if send_to_terminal(socket_path, command):
+                    print("✓ Command ready - press Enter to execute")
                 else:
-                    print("\n✗ Could not send command to terminal")
-                    print("• Please type the command manually\n")
+                    print("✗ Failed to send command to terminal")
                 
     except KeyboardInterrupt:
         print("\n\n=== Relay stopped ===")
         sys.exit(0)
-    except Exception as e:
-        print(f"\n[ERROR] Unexpected error: {str(e)}")
-        sys.exit(1)
 
 def stop_relay(args):
-    """
-    Stop the relay service by unsubscribing from Redis.
-    """
-    try:
-        r = redis.Redis(host='localhost', port=6379, db=0)
-        # Publish a special message to indicate stopping
-        r.publish('llm_suggestions', '=== Relay stopping ===')
-        print("Relay stopped.")
-    except:
+    """Stop the tmate session if running."""
+    socket_path = get_tmate_socket()
+    if socket_path:
+        try:
+            subprocess.run(
+                ["tmate", "-S", socket_path, "kill-session"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("Relay session stopped.")
+        except subprocess.CalledProcessError:
+            print("Failed to stop relay session.")
+    else:
         print("No active relay session found.")
 
 def main():
