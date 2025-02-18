@@ -7,15 +7,18 @@ import time
 import subprocess
 from datetime import datetime
 
+SOCKET_PATH = "/tmp/tmate.sock"
+
 def send_to_terminal(command):
     """Send command to terminal, ready for execution"""
     try:
         # Clear any existing input
-        subprocess.run(['tmate', 'send-keys', 'C-u'], check=True)
+        subprocess.run(['tmate', '-S', SOCKET_PATH, 'send-keys', 'C-u'], check=True)
         # Send the command
-        subprocess.run(['tmate', 'send-keys', command], check=True)
+        subprocess.run(['tmate', '-S', SOCKET_PATH, 'send-keys', command], check=True)
         return True
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {str(e)}")
         return False
 
 def start_relay(args):
