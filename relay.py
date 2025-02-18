@@ -143,6 +143,8 @@ def start_relay(args):
     # Create a new session in detached mode (minimal shell)
     print("• Creating new tmate session...")
     os.environ["TMATE_NOPROMPT"] = "1"
+    if "TMUX" in os.environ:
+        del os.environ["TMUX"]
     
     # Retry session creation a few times
     max_retries = 3
