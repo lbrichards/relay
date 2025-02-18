@@ -162,9 +162,9 @@ def start_relay(args):
     for attempt in range(max_retries):
         try:
             # First try without detached mode to see any errors
-            # Start tmate with minimal options
+            # Start tmate with a specific command to run
             result = subprocess.run(
-                ["tmate", "-F", "-S", SOCKET_PATH, "new-session", "-d"],
+                ["tmate", "-S", SOCKET_PATH, "new-session", "-d", "bash -l"],
                 capture_output=True,
                 text=True
             )
@@ -243,8 +243,18 @@ def start_relay(args):
     print("• Type 'exit' to end the session")
     print("• Use 'relay stop' in another terminal to end completely\n")
     
+    print("\n=== Attaching to relay session ===")
+    print("• You should see a bash prompt below")
+    print("• Commands will appear as they arrive")
+    print("• Press Ctrl-B D to detach\n")
+    
     try:
+        # Clear any pending input
+        subprocess.run(["tmate", "-S", SOCKET_PATH, "send-keys", "C-l"])
+        
+        # Attach to the session
         subprocess.run(["tmate", "-S", SOCKET_PATH, "attach"], check=True)
+        
         print("\n=== Detached from relay session ===")
         if is_tmate_session_alive():
             print("• Session is still running and receiving commands")
