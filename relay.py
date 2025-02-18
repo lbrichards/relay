@@ -43,32 +43,22 @@ def create_tmate_session():
     try:
         # Start tmate with interactive shell
         subprocess.run(
-            ["tmate", "new-session", "-d", "/bin/bash --login"],
+            ["tmate", "-S", "/tmp/tmate.sock", "new-session", "-d", "bash"],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        print("DEBUG: Created tmate session with interactive shell")
+        print("DEBUG: Created tmate session")
         
-        # Give the session a moment to initialize
-        time.sleep(1)
-        
-        # Get the socket path
-        socket_path = get_tmate_socket()
-        if not socket_path:
-            print("[ERROR] Could not find tmate socket after creating session")
-            return None
+        # Wait for session to be ready
+        for _ in range(5):  # Try for 5 seconds
+            if os.path.exists("/tmp/tmate.sock"):
+                print("DEBUG: Session is ready")
+                return "/tmp/tmate.sock"
+            time.sleep(1)
             
-        # Configure the session for proper terminal behavior
-        subprocess.run(
-            ["tmate", "-S", socket_path, "set", "-g", "status", "off"],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        
-        print("DEBUG: Configured tmate session")
-        return socket_path
+        print("[ERROR] Timed out waiting for session")
+        return None
         
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] Failed to create tmate session: {str(e)}")
@@ -102,7 +92,16 @@ def send_to_terminal(socket_path, command):
         return False
         
     try:
-        # Send the command without executing it
+        # Clear any existing input
+        subprocess.run(
+            ['tmate', '-S', socket_path, 'send-keys', 'C-c'],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        time.sleep(0.1)
+        
+        # Send the command
         subprocess.run(
             ['tmate', '-S', socket_path, 'send-keys', command],
             check=True,
