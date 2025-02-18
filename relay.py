@@ -125,7 +125,7 @@ def get_tmate_urls(socket_path):
 
 def send_to_terminal(shell, command):
     """Send command to terminal, ready for execution"""
-    if not shell:
+    if not shell or not isinstance(shell, CommandShell):
         print("Error: No active shell session")
         return False
         
@@ -175,11 +175,23 @@ def start_relay(args):
     print("• Commands will be executed in this terminal")
     print("• Press Ctrl-C to stop\n")
 
+    shell = None
     try:
+        # Start interactive shell
+        shell = create_shell()
+        if not shell:
+            print("[ERROR] Failed to create interactive shell")
+            return
+
+        print("\n✓ Interactive shell ready")
+        print("• Commands will be executed in this terminal")
+        print("• Press Ctrl-C to stop\n")
+
+        # Connect to Redis
         pubsub = r.pubsub(ignore_subscribe_messages=True)
         pubsub.subscribe('llm_suggestions')
         
-        print("\n=== Relay Started ===")
+        print("=== Relay Started ===")
         print("• Connected to Redis")
         print("• Subscribed to llm_suggestions channel")
         print("• Commands will appear here")
