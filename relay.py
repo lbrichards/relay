@@ -61,10 +61,7 @@ def start_relay(args):
                 print("\r\033[K", end="")
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 command = message['data'].decode('utf-8')
-                print(f"\n[{timestamp}] Command received:")
-                print("="*50)
-                print(f"{command}")
-                print("="*50)
+                print(f"\n[{timestamp}] Sending command to terminal...")
                 
                 if send_to_terminal(command):
                     print("\n✓ Command ready")
