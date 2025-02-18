@@ -28,13 +28,15 @@ def get_tmate_socket():
     """Find the active tmate socket"""
     try:
         # List all files in /tmp that start with 'tmate-'
-        result = subprocess.run(['ls', '/tmp/tmate-*'], capture_output=True, text=True, check=True)
-        sockets = result.stdout.strip().split('\n')
-        # Return the first socket found
-        if sockets:
-            return sockets[0]
-    except subprocess.CalledProcessError:
-        pass
+        result = subprocess.run(['ls', '/tmp/tmate-*'], shell=True, capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout:
+            # Get the most recently modified socket
+            sockets = result.stdout.strip().split('\n')
+            latest = max(sockets, key=lambda x: os.path.getmtime(x))
+            print(f"DEBUG: Found tmate socket: {latest}")
+            return latest
+    except Exception as e:
+        print(f"DEBUG: Error finding tmate socket: {str(e)}")
     return None
 
 def send_to_terminal(command):
@@ -46,14 +48,15 @@ def send_to_terminal(command):
         
     try:
         # Clear any existing input
-        subprocess.run(['tmate', '-S', socket_path, 'send-keys', 'C-u'], check=True)
-        # Send the command
-        subprocess.run(['tmate', '-S', socket_path, 'send-keys', command], check=True)
+        subprocess.run(['tmate', '-S', socket_path, 'send-keys', '-l', command], 
+                      check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Send Enter key
-        subprocess.run(['tmate', '-S', socket_path, 'send-keys', 'Enter'], check=True)
+        subprocess.run(['tmate', '-S', socket_path, 'send-keys', 'Enter'],
+                      check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"DEBUG: Command sent via {socket_path}")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"Error: {str(e)}")
+        print(f"Error sending command: {str(e)}")
         return False
 
 def publish_urls_to_redis(r, web_url, ssh_url):
