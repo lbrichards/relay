@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A CLI tool to manage tmate sessions and optionally watch a webpage."
 authors = [{ name = "Your Name", email = "your.email@example.com" }]
 readme = "README.md"
-license = "MIT"
+license = { text = "MIT" }
 requires-python = ">=3.7"
 
 # Dependencies needed for 'requests', 'beautifulsoup4', etc.
