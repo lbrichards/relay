@@ -60,7 +60,6 @@ def watch_webpage(interval_sec=1):
 
         time.sleep(interval_sec)
 
-
 def is_tmate_session_alive():
     """Check if the tmate session is running."""
     try:
@@ -82,38 +81,56 @@ def send_keys_to_tmate(text, chunk_size=100):
 
     try:
         # Force a fresh line
-        subprocess.run([
-            "tmate", "-S", SOCKET_PATH,
-            "send-keys",
-            "-t", "0.0",
-            "C-u"  # Clear line
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "send-keys", "C-u"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
 
         # Break long text into chunks
         chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
         
         for chunk in chunks:
-            subprocess.run([
-                "tmate", "-S", SOCKET_PATH,
-                "send-keys",
-                "-t", "0.0",
-                chunk
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                ["tmate", "-S", SOCKET_PATH, "send-keys", chunk],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
             time.sleep(0.1)  # Small delay between chunks
         
         # Add final newline
-        subprocess.run([
-            "tmate", "-S", SOCKET_PATH,
-            "send-keys",
-            "-t", "0.0",
-            "Enter"
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "send-keys", "Enter"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
 
-        print("[watch-web] ✓ Command sent successfully")
         return True
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] Failed to send command to tmate: {str(e)}")
         return False
+
+def wait_for_tmate_ready(timeout=30):
+    """Wait for tmate to be ready and return session links."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            # Try to get session links
+            ssh_ro = subprocess.check_output(
+                ["tmate", "-S", SOCKET_PATH, "display", "-p", "#{tmate_ssh_ro}"],
+                stderr=subprocess.DEVNULL
+            ).decode().strip()
+            
+            if ssh_ro and "ssh" in ssh_ro:
+                return ssh_ro
+        except:
+            pass
+        time.sleep(1)
+    return None
+
 def start_relay(args):
     """Start a relay session that:
     1. Creates a tmate session for sharing terminal
@@ -139,121 +156,65 @@ def start_relay(args):
         try:
             subprocess.run(
                 ["tmate", "-S", SOCKET_PATH, "kill-session"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 check=True
             )
             time.sleep(1)  # Give time for cleanup
         except subprocess.CalledProcessError:
             print("[WARN] Could not clean up old session, but continuing...")
 
-    # Create a new session in detached mode (minimal shell)
-    print("• Creating new tmate session...")
-    os.environ["TMATE_NOPROMPT"] = "1"  # Try to suppress the welcome message
-    os.environ["TMATE_FOREGROUND"] = "1"  # Run in foreground mode
+    # Create a new session
+    print("• Creating tmate session...")
+    
+    # Clean environment
     if "TMUX" in os.environ:
         del os.environ["TMUX"]
+    os.environ["TMATE_NOPROMPT"] = "1"
     
-    print("\nNOTE: When tmate starts, you may need to:")
-    print("1. Press 'q' to dismiss the welcome message")
-    print("2. Then you'll see commands as they arrive\n")
-    
-    # Retry session creation a few times
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            # First try without detached mode to see any errors
-            # Start tmate with a specific command to run
-            result = subprocess.run(
-                ["tmate", "-S", SOCKET_PATH, "new-session", "-d", "bash -l"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                print(f"[DEBUG] tmate output: {result.stdout}")
-                print(f"[DEBUG] tmate error: {result.stderr}")
-                if attempt == max_retries - 1:
-                    print("[ERROR] Failed to create tmate session after multiple attempts")
-                    return
-                print(f"• Retrying session creation (attempt {attempt + 2}/{max_retries})...")
-                time.sleep(2)
-            else:
-                break
-        except subprocess.CalledProcessError as e:
-            print(f"[DEBUG] Exception: {str(e)}")
-            if attempt == max_retries - 1:
-                print("[ERROR] Failed to create tmate session after multiple attempts")
-                return
-            print(f"• Retrying session creation (attempt {attempt + 2}/{max_retries})...")
-            time.sleep(2)
-
-    # Wait for tmate-ready with timeout
-    print("• Waiting for tmate session to be ready...")
-    timeout = time.time() + 30  # 30 second timeout
-    while time.time() < timeout:
-        try:
-            subprocess.run(
-                ["tmate", "-S", SOCKET_PATH, "wait", "tmate-ready"],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5
-            )
-            break
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            if time.time() >= timeout:
-                print("[ERROR] Tmate session failed to initialize (timeout)")
-                return
-            time.sleep(1)
-            continue
-
-    # Retrieve read-only link with retries
-    print("• Getting session links...")
-    for attempt in range(3):
-        try:
-            ssh_ro_link = subprocess.check_output(
-                ["tmate", "-S", SOCKET_PATH, "display", "-p", "#{tmate_ssh_ro}"],
-                timeout=5
-            ).decode("utf-8").strip()
-            
-            web_ro_link = subprocess.check_output(
-                ["tmate", "-S", SOCKET_PATH, "display", "-p", "#{tmate_web_ro}"],
-                timeout=5
-            ).decode("utf-8").strip()
-            
-            print(f"\n✓ SSH Read-Only:  {ssh_ro_link}")
-            print(f"✓ Web Read-Only:  {web_ro_link}")
-            break
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            if attempt == 2:
-                print("[ERROR] Failed to get session links")
-                return
-            time.sleep(2)
-            continue
+    # Start tmate in a clean way
+    try:
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "new-session", "-d", "bash"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+    except subprocess.CalledProcessError:
+        print("[ERROR] Failed to create tmate session")
+        return
+        
+    # Wait for session to be ready and get link
+    print("• Waiting for session to be ready...")
+    ssh_ro_link = wait_for_tmate_ready()
+    if not ssh_ro_link:
+        print("[ERROR] Tmate session failed to initialize")
+        return
+        
+    print(f"\n✓ Share this link with the LLM:")
+    print(f"  {ssh_ro_link}")
 
     # Start background thread to watch the webpage
     print("\n• Starting command relay...")
     watcher_thread = threading.Thread(target=watch_webpage, daemon=True)
     watcher_thread.start()
 
-    # Show instructions
-    print("\n=== Relay Ready ===")
-    print("• Share the read-only SSH link with the LLM")
-    print("• Commands will appear here when received")
+    # Show instructions and attach
+    print("\n• Commands will appear here when received")
     print("• Press Ctrl-B D to detach (session stays active)")
-    print("• Type 'exit' to end the session")
-    print("• Use 'relay stop' in another terminal to end completely\n")
-    
-    print("\n=== Attaching to relay session ===")
-    print("• You should see a bash prompt below")
-    print("• Commands will appear as they arrive")
-    print("• Press Ctrl-B D to detach\n")
+    print("• Use 'relay stop' to end completely\n")
     
     try:
-        # Clear any pending input
-        subprocess.run(["tmate", "-S", SOCKET_PATH, "send-keys", "C-l"])
-        
-        # Attach to the session
-        subprocess.run(["tmate", "-S", SOCKET_PATH, "attach"], check=True)
+        # Clear screen and attach
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "send-keys", "clear", "Enter"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "attach"],
+            check=True
+        )
         
         print("\n=== Detached from relay session ===")
         if is_tmate_session_alive():
@@ -265,19 +226,24 @@ def start_relay(args):
 def stop_relay(args):
     """Stop the tmate session if running."""
     try:
-        subprocess.run(["tmate", "-S", SOCKET_PATH, "kill-session"], check=True)
-        print("Tmate session stopped.")
+        subprocess.run(
+            ["tmate", "-S", SOCKET_PATH, "kill-session"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+        print("Relay session stopped.")
     except subprocess.CalledProcessError:
-        print("No active tmate session found (or already stopped).")
+        print("No active relay session found.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Relay CLI: Single command to run tmate + watch a web page.")
+    parser = argparse.ArgumentParser(description="Relay CLI: Watch AI Bridge and relay commands to terminal.")
     subparsers = parser.add_subparsers(dest="command")
 
-    parser_start = subparsers.add_parser("start", help="Start tmate session + webpage watcher.")
+    parser_start = subparsers.add_parser("start", help="Start relay session.")
     parser_start.set_defaults(func=start_relay)
 
-    parser_stop = subparsers.add_parser("stop", help="Stop tmate session.")
+    parser_stop = subparsers.add_parser("stop", help="Stop relay session.")
     parser_stop.set_defaults(func=stop_relay)
 
     args = parser.parse_args()
