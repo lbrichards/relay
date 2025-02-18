@@ -167,26 +167,15 @@ def start_relay(args):
         print(f"\n[ERROR] Redis error: {str(e)}")
         return
 
-    # Create new tmate session
-    socket_path = create_tmate_session()
-    if not socket_path:
-        print("[ERROR] Failed to create tmate session")
+    # Create interactive shell
+    shell = InteractiveShell()
+    if not shell.start():
+        print("[ERROR] Failed to create interactive shell")
         return
 
-    # Get URLs from tmate messages
-    web_url, ssh_url = get_tmate_urls(socket_path)
-    if web_url and ssh_url:
-        print("\n✓ Found tmate URLs:")
-        print(f"• Web (preferred): {web_url}")
-        print(f"• SSH (alternate): {ssh_url}")
-        
-        # Publish URLs to Redis
-        if publish_urls_to_redis(r, web_url, ssh_url):
-            print("• URLs have been shared with OpenHands\n")
-        else:
-            print("• Failed to share URLs with OpenHands\n")
-    else:
-        print("[WARN] Could not get tmate URLs - will retry periodically")
+    print("\n✓ Interactive shell ready")
+    print("• Commands will be executed in this terminal")
+    print("• Press Ctrl-C to stop\n")
 
     try:
         pubsub = r.pubsub(ignore_subscribe_messages=True)
@@ -214,20 +203,16 @@ def start_relay(args):
         sys.exit(0)
 
 def stop_relay(args):
-    """Stop the tmate session if running."""
-    socket_path = get_tmate_socket()
-    if socket_path:
-        try:
-            subprocess.run(
-                ["tmate", "-S", socket_path, "kill-session"],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print("Relay session stopped.")
-        except subprocess.CalledProcessError:
-            print("Failed to stop relay session.")
-    else:
+    """Stop any running shell processes."""
+    try:
+        # Find and kill any relay processes
+        subprocess.run(
+            ["pkill", "-f", "relay"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        print("Relay session stopped.")
+    except:
         print("No active relay session found.")
 
 def main():
