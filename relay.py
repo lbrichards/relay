@@ -4,7 +4,17 @@ import argparse
 import redis
 import sys
 import time
+import subprocess
 from datetime import datetime
+
+def copy_to_clipboard(text):
+    """Copy text to system clipboard using pbcopy (macOS)"""
+    try:
+        process = subprocess.Popen('pbcopy', stdin=subprocess.PIPE)
+        process.communicate(text.encode('utf-8'))
+        return True
+    except:
+        return False
 
 def start_relay(args):
     """
@@ -45,10 +55,19 @@ def start_relay(args):
                 # Clear line and print with timestamp
                 print("\r\033[K", end="")
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                print(f"\n[{timestamp}] Message from LLM:")
+                command = message['data'].decode('utf-8')
+                print(f"\n[{timestamp}] Command received:")
                 print("="*50)
-                print(f"{message['data'].decode('utf-8')}")
-                print("="*50 + "\n")
+                print(f"{command}")
+                print("="*50)
+                
+                if copy_to_clipboard(command):
+                    print("\n✓ Command copied to clipboard")
+                    print("• Press Cmd+V to paste")
+                    print("• Then press Enter to execute\n")
+                else:
+                    print("\n✗ Could not copy to clipboard")
+                    print("• Please copy the command manually\n")
                 
     except KeyboardInterrupt:
         print("\n\n=== Relay stopped ===")
